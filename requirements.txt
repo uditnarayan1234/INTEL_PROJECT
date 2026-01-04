@@ -1,6 +1,7 @@
 streamlit
 tensorflow-cpu==2.10.0
 opencv-python-headless
-faiss-cpu
 numpy
+faiss-cpu
 scikit-learn
+Pillow
