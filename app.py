@@ -25,15 +25,14 @@ output_details = interpreter.get_output_details()
 
 def preprocess(img):
     img = cv2.resize(img, (224, 224))
-    img = img / 255.0
-    return img.astype("float32")
+    return img.astype("uint8")  # 🔥 INT8 expects uint8
 
 def get_embedding(img):
     img = preprocess(img)[None, ...]
     interpreter.set_tensor(input_details[0]["index"], img)
     interpreter.invoke()
-    emb = interpreter.get_tensor(output_details[0]["index"])
-    return normalize(emb).astype("float32")
+    emb = interpreter.get_tensor(output_details[0]["index"]).astype("float32")
+    return normalize(emb)
 
 st.title("🔍 AI-Powered Image Similarity Search")
 
@@ -53,3 +52,4 @@ if uploaded:
     for col, i in zip(cols, idx[0]):
         sim_img = Image.open(image_paths[i])
         col.image(sim_img, use_column_width=True)
+
