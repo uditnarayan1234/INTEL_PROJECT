@@ -1,78 +1,55 @@
 import streamlit as st
 import numpy as np
 import cv2
-import faiss
 import tensorflow as tf
+import faiss
 from sklearn.preprocessing import normalize
-import matplotlib.pyplot as plt
+from PIL import Image
 
-# ---------------------------
-# CONFIG
-# ---------------------------
 st.set_page_config(page_title="Image Similarity Search", layout="wide")
 
-# ---------------------------
-# LOAD MODEL & DATA
-# ---------------------------
 @st.cache_resource
-def load_model():
-    return tf.keras.models.load_model("embedding_model.h5", compile=False)
+def load_all():
+    interpreter = tf.lite.Interpreter(model_path="embedding_model_int8.tflite")
+    interpreter.allocate_tensors()
 
-@st.cache_resource
-def load_faiss():
-    return faiss.read_index("faiss.index")
+    index = faiss.read_index("faiss.index")
+    image_paths = np.load("image_paths.npy", allow_pickle=True)
 
-@st.cache_data
-def load_paths():
-    return np.load("image_paths.npy", allow_pickle=True)
+    return interpreter, index, image_paths
 
-model = load_model()
-index = load_faiss()
-image_paths = load_paths()
+interpreter, index, image_paths = load_all()
 
-# ---------------------------
-# IMAGE PREPROCESSING
-# ---------------------------
-def preprocess_image(img):
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+def preprocess(img):
     img = cv2.resize(img, (224, 224))
     img = img / 255.0
     return img.astype("float32")
 
-# ---------------------------
-# SEARCH FUNCTION
-# ---------------------------
-def search_similar(img, k=5):
-    img = preprocess_image(img)
-    emb = model.predict(img[np.newaxis, ...], verbose=0)
-    emb = normalize(emb).astype("float32")
+def get_embedding(img):
+    img = preprocess(img)[None, ...]
+    interpreter.set_tensor(input_details[0]["index"], img)
+    interpreter.invoke()
+    emb = interpreter.get_tensor(output_details[0]["index"])
+    return normalize(emb).astype("float32")
 
-    distances, indices = index.search(emb, k)
-    return [image_paths[i] for i in indices[0]]
+st.title("🔍 AI-Powered Image Similarity Search")
 
-# ---------------------------
-# UI
-# ---------------------------
-st.title("🧠 AI-Powered Image Similarity Search")
-st.markdown("Upload an image to find visually similar fashion products.")
+uploaded = st.file_uploader("Upload an image", type=["jpg", "png", "jpeg"])
 
-uploaded_file = st.file_uploader("Upload Image", type=["jpg", "png", "jpeg"])
+if uploaded:
+    img = Image.open(uploaded).convert("RGB")
+    img_np = np.array(img)
 
-if uploaded_file:
-    file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-    img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+    st.image(img, caption="Query Image", width=300)
 
-    st.subheader("Query Image")
-    st.image(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), width=300)
+    emb = get_embedding(img_np)
+    _, idx = index.search(emb, 5)
 
-    if st.button("Find Similar Images"):
-        with st.spinner("Searching..."):
-            results = search_similar(img, k=5)
-
-        st.subheader("Similar Images")
-        cols = st.columns(5)
-
-        for col, path in zip(cols, results):
-            simg = cv2.imread(path)
-            simg = cv2.cvtColor(simg, cv2.COLOR_BGR2RGB)
-            col.image(simg, use_column_width=True)
+    st.subheader("Similar Images")
+    cols = st.columns(5)
+    for col, i in zip(cols, idx[0]):
+        sim_img = Image.open(image_paths[i])
+        col.image(sim_img, use_column_width=True)
